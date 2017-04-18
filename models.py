@@ -83,13 +83,14 @@ class Factorial(pyhsmm.basic.abstractions.ModelGibbsSampling):
 # NOTE: component_models must have scalar gaussian observation
 # distributions! this code, which references the same cached means and vars as
 # the states, requires it!
-class FactorialComponentHSMM(pyhsmm.models.HSMM):
+class FactorialComponentHSMM(pyhsmm.models.WeakLimitHDPHSMM):
+    trunc = False
     def __init__(self,**kwargs): # no explicit parameter naming because DRY
         assert 'obs_distns' in kwargs
         obs_distns = kwargs['obs_distns']
         self.means, self.vars = np.zeros(len(obs_distns)), np.zeros(len(obs_distns))
         for idx, distn in enumerate(obs_distns):
-            assert isinstance(distn,pyhsmm.basic.distributions.ScalarGaussian),\
+            assert isinstance(distn,pyhsmm.basic.distributions.ScalarGaussianFixedvar),\
                     'Factorial model components must have scalar Gaussian observation distributions!'
             distn.mubin = self.means[idx,...]
             distn.sigmasqbin = self.vars[idx,...]
@@ -97,7 +98,7 @@ class FactorialComponentHSMM(pyhsmm.models.HSMM):
             self.vars[idx] = distn.sigmasq
         super(FactorialComponentHSMM,self).__init__(**kwargs)
 
-    def generate(self,T,keep=True):
+    def generate_observation(self,T,keep=True):
         # just like parent method, except uses our own states class
         tempstates = \
                 FactorialComponentHSMMStates(
@@ -105,9 +106,19 @@ class FactorialComponentHSMM(pyhsmm.models.HSMM):
                         vars=self.vars,
                         model=self,
                         T=T,
-                        trunc=self.trunc
+                        trunc=self.trunc,
                 )
         return self._generate(tempstates,keep)
+
+    def _generate(self, tempstates, keep):
+        obs, labels = tempstates.generate_obs(), tempstates.stateseq
+
+        if keep:
+            tempstates.added_with_generate = True
+            tempstates.data = obs
+            self.states_list.append(tempstates)
+
+        return obs, labels
 
     def add_factorial_sumdata(self,data):
         assert data.ndim == 1 or data.ndim == 2

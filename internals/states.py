@@ -1,12 +1,12 @@
 from __future__ import division
 import numpy as np
 na = np.newaxis
-import scipy.weave
+#import scipy.weave
 
 import pyhsmm
 
-import os
-eigen_path = os.path.join(os.path.dirname(__file__),'../../../deps/Eigen3')
+# import os
+# eigen_path = os.path.join(os.path.dirname(__file__),'../../../deps/Eigen3')
 
 ######################################################
 #  used by pyhsmm.plugins.factorial.factorial class  #
@@ -40,7 +40,7 @@ class FactorialStates(object):
             allstates = np.zeros((T,len(component_models)),dtype=np.int32)
             assert T is not None, 'need to pass in either T (when generating) or data'
             for idx,c in enumerate(component_models):
-                allobs[:,idx],allstates[:,idx] = c.generate(T=T,keep=keep,**kwargs)
+                allobs[:,idx],allstates[:,idx] = c.generate_observation(T=T,keep=keep,**kwargs)
                 self.states_list.append(c.states_list[-1])
                 self.states_list[-1].allstates_obj = self # give a reference to self
             self.sumobs = allobs.sum(1)
@@ -109,27 +109,27 @@ class FactorialStates(object):
 
         return contributions
 
-    def _sample_component_emissions_eigen(self,temp_noise=0.):
-        # NOTE: this version does a smart cholesky downdate
-        K,T = len(self.component_models), self.data.shape[0]
-        contributions = np.zeros((T,K))
-        G = np.random.randn(T,K)
+    # def _sample_component_emissions_eigen(self,temp_noise=0.):
+    #     # NOTE: this version does a smart cholesky downdate
+    #     K,T = len(self.component_models), self.data.shape[0]
+    #     contributions = np.zeros((T,K))
+    #     G = np.random.randn(T,K)
+    #
+    #     meanseq = self.museqs
+    #     varseq = self.varseqs
+    #
+    #     tots = varseq.sum(1)[:,na] + temp_noise
+    #     post_meanseq = meanseq + varseq * ((self.data - meanseq.sum(1)[:,na]) / tots)
+    #
+    #     noise_variance = temp_noise
+    #
+    #     scipy.weave.inline(self.codestr,['varseq','meanseq','post_meanseq','G','contributions','noise_variance'],
+    #             headers=['<Eigen/Core>'],include_dirs=[eigen_path],extra_compile_args=['-O3'],
+    #             verbose=0)
+    #
+    #     return contributions
 
-        meanseq = self.museqs
-        varseq = self.varseqs
-
-        tots = varseq.sum(1)[:,na] + temp_noise
-        post_meanseq = meanseq + varseq * ((self.data - meanseq.sum(1)[:,na]) / tots)
-
-        noise_variance = temp_noise
-
-        scipy.weave.inline(self.codestr,['varseq','meanseq','post_meanseq','G','contributions','noise_variance'],
-                headers=['<Eigen/Core>'],include_dirs=[eigen_path],extra_compile_args=['-O3'],
-                verbose=0)
-
-        return contributions
-
-    _sample_component_emissions = _sample_component_emissions_eigen # NOTE: set this to choose python or eigen
+    _sample_component_emissions = _sample_component_emissions_python # NOTE: set this to choose python or eigen
 
 
 ####################################################################
@@ -148,7 +148,10 @@ class FactorialStates(object):
 # distributions! this code, which references the same cached means and vars as
 # the models, requires it!
 
-class FactorialComponentHSMMStates(pyhsmm.internals.states.HSMMStatesPython):
+# from pyhsmm.internals.hsmm_states.HSMMStatesPython import HSMMStatesPython
+from pyhsmm.util.general import rle
+
+class FactorialComponentHSMMStates(pyhsmm.internals.hsmm_states.HSMMStatesPython):
     def __init__(self,means,vars,**kwargs):
         self.means = means
         self.vars = vars
@@ -162,6 +165,11 @@ class FactorialComponentHSMMStates(pyhsmm.internals.states.HSMMStatesPython):
         super(FactorialComponentHSMMStates,self).resample()
         del self.temp_noise
 
+    def generate_obs(self):
+        obs = []
+        for state, dur in zip(*rle(self.stateseq)):
+            obs.append(self.obs_distns[state].rvs(int(dur)))
+        return np.concatenate(obs)
     # NOTE: component_models must have scalar gaussian observation
     # distributions! this code requires it!
     @property
@@ -182,7 +190,7 @@ class FactorialComponentHSMMStates(pyhsmm.internals.states.HSMMStatesPython):
 
 class FactorialComponentHSMMStatesPossibleChangepoints(
         FactorialComponentHSMMStates,
-        pyhsmm.internals.states.HSMMStatesPossibleChangepoints):
+        pyhsmm.internals.hsmm_states.HSMMStatesPossibleChangepoints):
     def __init__(self,means,vars,**kwargs):
         assert 'changepoints' in kwargs, 'must pass in a changepoints argument!'
         self.means = means
